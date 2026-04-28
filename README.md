@@ -77,27 +77,6 @@ Dashboard runs at → http://localhost:5173
 
 ---
 
-## 📈 User Stories Implemented
-
-| ID | Story | Status |
-|---|---|---|
-| US-01 | Data Ingestion | ✅ Done |
-| US-02 | Data Preprocessing | ✅ Done |
-| US-03 | Feature Engineering | ✅ Done |
-| US-04 | SARIMA Model | ✅ Done |
-| US-05 | LSTM Model | ✅ Done |
-| US-06 | Model Evaluation | ✅ Done |
-| US-07 | Prediction API | ✅ Done |
-| US-08 | Dashboard Visualization | ✅ Done |
-| US-09 | Anomaly Detection | ✅ Done |
-| US-10 | Optimization Suggestions | ✅ Done |
-| US-11 | Data Storage | ✅ Done |
-| US-12 | Model Tuning | ✅ Done |
-| US-13 | UI Enhancements | ✅ Done |
-| US-14 | Azure Deployment | 🔄 In Progress |
-
----
-
 ## 📉 Model Performance
 
 | Model | RMSE | MAE | sMAPE |
