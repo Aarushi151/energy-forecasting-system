@@ -1,1 +1,109 @@
-# -energy-forecasting-system
+# ⚡ Energy Consumption Forecasting System
+
+A full-stack AI-powered smart meter analytics platform that predicts energy usage using **SARIMA** and **LSTM** models, with anomaly detection, optimization suggestions, and a real-time React dashboard.
+
+---
+
+## 📋 Project Overview
+
+**Domain:** Time Series Forecasting  
+**Dataset:** Smart Meter Data (hourly energy consumption)  
+**Objective:** Predict energy usage to help users reduce costs and optimize consumption patterns
+
+---
+
+## 🚀 Key Features
+
+- **SARIMA + LSTM Models** — Statistical and deep learning models trained on real smart meter data
+- **Auto Model Selection** — Automatically picks the best model based on RMSE, MAE, and wMAPE
+- **Prediction API** — FastAPI server with endpoints for forecasting, anomaly detection, and optimization
+- **React Dashboard** — Interactive visualization with forecast charts, anomaly detection, and suggestions
+- **Anomaly Detection** — Z-score and Isolation Forest methods to flag unusual consumption
+- **Optimization Engine** — Rule-based suggestions to reduce energy costs
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|---|---|
+| ML Models | SARIMA (statsmodels), LSTM (TensorFlow/Keras) |
+| Anomaly Detection | Z-score, Isolation Forest (scikit-learn) |
+| API | FastAPI, Uvicorn |
+| Frontend | React, Recharts, Vite |
+| Data Processing | Pandas, NumPy, Scikit-learn |
+
+---
+
+## ⚙️ How to Run
+
+### 1. Install Python dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Train the models
+```bash
+python train.py
+```
+This runs the full 10-step pipeline and saves models to `models/`
+
+### 3. Start the API
+```bash
+python api.py
+```
+API runs at → http://localhost:8000  
+Swagger docs → http://localhost:8000/docs
+
+### 4. Start the Dashboard
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Dashboard runs at → http://localhost:5173
+
+---
+
+## 📊 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Check API and model status |
+| POST | `/predict` | Forecast energy consumption |
+| POST | `/anomalies` | Detect anomalies in readings |
+| POST | `/optimize` | Get energy-saving suggestions |
+| GET | `/model/info` | View model metrics and features |
+
+---
+
+## 📈 User Stories Implemented
+
+| ID | Story | Status |
+|---|---|---|
+| US-01 | Data Ingestion | ✅ Done |
+| US-02 | Data Preprocessing | ✅ Done |
+| US-03 | Feature Engineering | ✅ Done |
+| US-04 | SARIMA Model | ✅ Done |
+| US-05 | LSTM Model | ✅ Done |
+| US-06 | Model Evaluation | ✅ Done |
+| US-07 | Prediction API | ✅ Done |
+| US-08 | Dashboard Visualization | ✅ Done |
+| US-09 | Anomaly Detection | ✅ Done |
+| US-10 | Optimization Suggestions | ✅ Done |
+| US-11 | Data Storage | ✅ Done |
+| US-12 | Model Tuning | ✅ Done |
+| US-13 | UI Enhancements | ✅ Done |
+| US-14 | Azure Deployment | 🔄 In Progress |
+
+---
+
+## 📉 Model Performance
+
+| Model | RMSE | MAE | sMAPE |
+|---|---|---|---|
+| SARIMA | ~0.05 | ~0.03 | ~8% |
+| LSTM | ~0.04 | ~0.02 | ~6% |
+
+
+
