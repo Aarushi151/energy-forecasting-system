@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+models/
+*.keras
+*.pkl
+node_modules/
+frontend/dist/
+.pycache/
+*.log
