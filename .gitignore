@@ -12,3 +12,8 @@ frontend/dist/
 
 *.db
 *.log
+
+# Ignore large model files for GitHub
+backend/models/*.pkl
+backend/models/*.json
+backend/models/*.h5

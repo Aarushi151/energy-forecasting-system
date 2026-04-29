@@ -1,68 +1,50 @@
 """
 =============================================================================
-  Smart Meter Energy Forecasting — Prediction API  (US-07)
+  Smart Meter Energy Forecasting — Prediction API
   FastAPI server exposing: /predict, /anomalies, /optimize, /health
 =============================================================================
 """
 
-import json
-import pickle
 import logging
-from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, List
 
 import numpy as np
-from backend import database
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from backend import database
+from backend.model_loader import download_models
+from backend.model_service import load_model, get_model, get_scaler, get_metadata
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger(__name__)
 
-# ── Load saved model artifacts ────────────────────────────────────────────────
-MODELS_DIR = Path(__file__).parent / "models"
+# Initialize database
+database.init_db()
 
-def load_artifacts():
-    meta_path = MODELS_DIR / "model_metadata.json"
-    if not meta_path.exists():
-        raise RuntimeError("models/model_metadata.json not found. Run train.py first.")
+# 1. DOWNLOAD MODELS
+download_models()
 
-    with open(meta_path) as f:
-        meta = json.load(f)
+# 2. LOAD MODELS
+MODEL_READY = load_model()
 
-    best = meta["best_model"]
-    log.info("Loading best model: %s", best)
-
-    if best == "SARIMA":
-        with open(MODELS_DIR / "best_model.pkl", "rb") as f:
-            model = pickle.load(f)
-        scaler = None
-    else:
-        import tensorflow as tf
-        model = tf.keras.models.load_model(str(MODELS_DIR / "best_model.keras"))
-        with open(MODELS_DIR / "lstm_scaler.pkl", "rb") as f:
-            scaler = pickle.load(f)
-
-    return model, scaler, meta
-
-try:
-    database.init_db()
-    MODEL, SCALER, META = load_artifacts()
-    BEST_NAME    = META["best_model"]
-    LOOKBACK     = META["lookback"]
-    FEATURE_COLS = META["feature_cols"]
-    TARGET_COL   = META["target_col"]
-    MODEL_READY  = True
-except Exception as exc:
-    log.warning("Could not load model: %s — /predict will return 503", exc)
-    MODEL, SCALER, META = None, None, {}
-    BEST_NAME = "UNKNOWN"
-    LOOKBACK, FEATURE_COLS, TARGET_COL = 24, [], "Electricity_Consumed"
-    MODEL_READY = False
-
+# 3. GET METADATA
+if MODEL_READY:
+    META = get_metadata()
+    BEST_NAME = META.get("best_model", "LSTM")
+    LOOKBACK = META.get("lookback", 24)
+    FEATURE_COLS = META.get("feature_cols", [])
+    TARGET_COL = META.get("target_col", "Consumption_kWh")
+else:
+    META = {}
+    BEST_NAME = "Unknown"
+    LOOKBACK = 24
+    FEATURE_COLS = []
+    TARGET_COL = "Consumption_kWh"
+    log.warning("Models could not be loaded. API endpoints requiring models will return 503.")
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -133,8 +115,10 @@ def _make_feature_row(ts: datetime, temp: float, hum: float, wind: float,
 
 @app.get("/health")
 def health():
+    if not MODEL_READY:
+        raise HTTPException(status_code=503, detail="Model not loaded. Service Unavailable.")
     return {
-        "status": "ok" if MODEL_READY else "model_not_loaded",
+        "status": "ok",
         "best_model": BEST_NAME,
         "lookback": LOOKBACK,
     }
@@ -143,9 +127,18 @@ def health():
 @app.post("/predict", response_model=ForecastResponse)
 def predict(req: ForecastRequest):
     if not MODEL_READY:
-        raise HTTPException(503, "Model not loaded. Run train.py first.")
+        raise HTTPException(status_code=503, detail="Model not loaded. Service Unavailable.")
 
-    start = datetime.fromisoformat(req.start_time.replace("Z", "")) if req.start_time else datetime.utcnow()
+    MODEL = get_model()
+    SCALER = get_scaler()
+
+    try:
+        if req.start_time and req.start_time != "string":
+            start = datetime.fromisoformat(req.start_time.replace("Z", ""))
+        else:
+            start = datetime.utcnow()
+    except Exception:
+        start = datetime.utcnow()
     horizon = req.horizon
 
     predictions = []
@@ -155,7 +148,8 @@ def predict(req: ForecastRequest):
             forecast = MODEL.forecast(steps=horizon)
             vals = np.clip(np.array(forecast), 0, None)
         except Exception as e:
-            raise HTTPException(500, f"SARIMA forecast error: {e}")
+            log.error(f"SARIMA forecast error: {e}")
+            raise HTTPException(status_code=500, detail=f"SARIMA forecast error: {e}")
 
         for i, v in enumerate(vals):
             ts = start + timedelta(hours=i)
@@ -167,41 +161,45 @@ def predict(req: ForecastRequest):
             database.insert_prediction(ts.isoformat(), BEST_NAME, horizon, kwh_val)
 
     else:  # LSTM
-        # Build synthetic seed window
-        seed_val = 0.5
-        lag24 = seed_val
-        roll6 = seed_val
-        window_rows = []
+        try:
+            # Build synthetic seed window
+            seed_val = 0.5
+            lag24 = seed_val
+            roll6 = seed_val
+            window_rows = []
 
-        for i in range(LOOKBACK):
-            ts = start - timedelta(hours=LOOKBACK - i)
-            row = _make_feature_row(ts, req.temperature, req.humidity,
-                                    req.wind_speed, seed_val, lag24, roll6)
-            window_rows.append([row.get(c, 0.0) for c in FEATURE_COLS] + [seed_val])
+            for i in range(LOOKBACK):
+                ts = start - timedelta(hours=LOOKBACK - i)
+                row = _make_feature_row(ts, req.temperature, req.humidity,
+                                        req.wind_speed, seed_val, lag24, roll6)
+                window_rows.append([row.get(c, 0.0) for c in FEATURE_COLS] + [seed_val])
 
-        window = np.array(window_rows, dtype=np.float32)
-        window_scaled = SCALER.transform(window)
+            window = np.array(window_rows, dtype=np.float32)
+            window_scaled = SCALER.transform(window)
 
-        for i in range(horizon):
-            ts = start + timedelta(hours=i)
-            x = window_scaled[np.newaxis, :, :-1]
-            p = float(MODEL.predict(x, verbose=0)[0, 0])
+            for i in range(horizon):
+                ts = start + timedelta(hours=i)
+                x = window_scaled[np.newaxis, :, :-1]
+                p = float(MODEL.predict(x, verbose=0)[0, 0])
 
-            # inverse transform
-            dummy = np.zeros((1, len(FEATURE_COLS) + 1))
-            dummy[0, -1] = p
-            val = float(np.clip(SCALER.inverse_transform(dummy)[0, -1], 0, None))
+                # inverse transform
+                dummy = np.zeros((1, len(FEATURE_COLS) + 1))
+                dummy[0, -1] = p
+                val = float(np.clip(SCALER.inverse_transform(dummy)[0, -1], 0, None))
 
-            predictions.append(ForecastPoint(
-                timestamp=ts.isoformat(),
-                predicted_kwh=round(val, 4)
-            ))
-            database.insert_prediction(ts.isoformat(), BEST_NAME, horizon, round(val, 4))
+                predictions.append(ForecastPoint(
+                    timestamp=ts.isoformat(),
+                    predicted_kwh=round(val, 4)
+                ))
+                database.insert_prediction(ts.isoformat(), BEST_NAME, horizon, round(val, 4))
 
-            # slide window
-            new_row = window_scaled[-1].copy()
-            new_row[-1] = p
-            window_scaled = np.vstack([window_scaled[1:], new_row])
+                # slide window
+                new_row = window_scaled[-1].copy()
+                new_row[-1] = p
+                window_scaled = np.vstack([window_scaled[1:], new_row])
+        except Exception as e:
+            log.error(f"LSTM forecast error: {e}")
+            raise HTTPException(status_code=500, detail=f"LSTM forecast error: {e}")
 
     return ForecastResponse(
         model_used=BEST_NAME,
@@ -215,7 +213,7 @@ def detect_anomalies(req: AnomalyRequest):
     """Z-score anomaly detection on provided readings."""
     readings = np.array(req.readings, dtype=float)
     if len(readings) < 3:
-        raise HTTPException(400, "Need at least 3 readings for anomaly detection.")
+        raise HTTPException(status_code=400, detail="Need at least 3 readings for anomaly detection.")
 
     mean, std = readings.mean(), readings.std()
     z_scores = np.abs((readings - mean) / (std + 1e-9))
@@ -248,7 +246,7 @@ def optimize(req: OptimizationRequest):
     """Rule-based optimization suggestions."""
     avg = np.array(req.hourly_avg)
     if len(avg) != 24:
-        raise HTTPException(400, "hourly_avg must have exactly 24 values.")
+        raise HTTPException(status_code=400, detail="hourly_avg must have exactly 24 values.")
 
     suggestions = []
     peak_hour = int(np.argmax(avg))
@@ -289,7 +287,7 @@ def optimize(req: OptimizationRequest):
 @app.get("/model/info")
 def model_info():
     if not MODEL_READY:
-        raise HTTPException(503, "Model not loaded.")
+        raise HTTPException(status_code=503, detail="Model not loaded. Service Unavailable.")
     return {
         "best_model": BEST_NAME,
         "feature_cols": FEATURE_COLS,
