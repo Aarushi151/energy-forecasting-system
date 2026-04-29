@@ -64,8 +64,8 @@ from scipy import stats
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-DATA_PATH = "data/smart_meter_data.csv"      # ← change if your CSV is elsewhere
-MODELS_DIR  = Path("models")
+DATA_PATH = Path(__file__).parent.parent / "data" / "smart_meter_data.csv"
+MODELS_DIR  = Path(__file__).parent / "models"
 MODELS_DIR.mkdir(exist_ok=True)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -697,43 +697,40 @@ def generate_optimization_suggestions(df: pd.DataFrame) -> list[str]:
     # Evening peak detection (18–22)
     evening_avg = hourly_avg[hourly_avg.index.isin(range(18, 23))].mean()
     night_avg   = hourly_avg[hourly_avg.index.isin(range(0, 6))].mean()
+    morning_avg = hourly_avg[hourly_avg.index.isin(range(6, 12))].mean()
+    
+    overall_mean = hourly_avg.mean()
+    variance = hourly_avg.var()
+
+    if variance > (overall_mean * 0.5) ** 2 + 1e-6:
+        suggestions.append("📉 Usage is highly variable throughout the day. Consider installing a smart thermostat or automated load balancing.")
+
+    if morning_avg > evening_avg * 1.2:
+        suggestions.append(f"🌅 Morning consumption is dominant. Shift non-essential morning loads (e.g., water heating) to the {off_peak:02d}:00 off-peak window.")
+    elif evening_avg > 1.5 * night_avg + 1e-6:
+        suggestions.append(f"⚡ Evening consumption is significantly higher. Distribute load away from the 18:00–22:00 window to avoid peak pricing.")
 
     if peak_hour in range(18, 23):
-        suggestions.append(
-            f"🔴 Peak demand occurs at {peak_hour:02d}:00. "
-            f"Consider shifting heavy appliance loads to off-peak hours (e.g., {off_peak:02d}:00)."
-        )
+        suggestions.append(f"🔴 Critical peak demand at {peak_hour:02d}:00. Actively shift heavy appliance usage to {off_peak:02d}:00.")
 
-    if evening_avg > 1.5 * night_avg:
-        suggestions.append(
-            "⚡ Evening consumption is significantly higher than night-time usage. "
-            "Distribute load to avoid 18:00–22:00 peak window."
-        )
+    if night_avg > overall_mean * 0.6:
+        suggestions.append("🌙 Nighttime base load is unusually high. Check for appliances left on or phantom energy draws while sleeping.")
 
     # Weekend vs weekday
     if "is_weekend" in df.columns:
         wd_avg = df[df["is_weekend"] == 0][target].mean()
         we_avg = df[df["is_weekend"] == 1][target].mean()
         if we_avg > wd_avg * 1.2:
-            suggestions.append(
-                "📅 Weekend consumption is 20%+ higher than weekdays. "
-                "Review weekend scheduling of HVAC and lighting systems."
-            )
+            suggestions.append("📅 Weekend usage is 20%+ above weekdays. Review weekend scheduling of HVAC, lighting, or facility systems.")
 
     # Anomaly-based
     if "anomaly_iforest" in df.columns:
         n_spikes = df["anomaly_iforest"].sum()
         if n_spikes > 0:
-            suggestions.append(
-                f"🔍 {n_spikes} abnormal consumption spikes detected. "
-                "Inspect equipment for inefficiencies or unauthorised usage."
-            )
+            suggestions.append(f"🔍 {n_spikes} anomalous spikes detected. Promptly inspect equipment for inefficiencies or faults.")
 
     # General suggestion
-    suggestions.append(
-        f"✅ Off-peak usage window: {off_peak:02d}:00–{(off_peak+2)%24:02d}:00. "
-        "Schedule energy-intensive tasks (laundry, dishwashers, EV charging) here."
-    )
+    suggestions.append(f"✅ Optimal off-peak window: {off_peak:02d}:00–{(off_peak+2)%24:02d}:00. Schedule EV charging, laundry, and dishwashers during this time.")
 
     for s in suggestions:
         log.info("  %s", s)

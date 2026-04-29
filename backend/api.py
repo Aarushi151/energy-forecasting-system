@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 
 import numpy as np
+from backend import database
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(
 log = logging.getLogger(__name__)
 
 # ── Load saved model artifacts ────────────────────────────────────────────────
-MODELS_DIR = Path("models")
+MODELS_DIR = Path(__file__).parent / "models"
 
 def load_artifacts():
     meta_path = MODELS_DIR / "model_metadata.json"
@@ -48,6 +49,7 @@ def load_artifacts():
     return model, scaler, meta
 
 try:
+    database.init_db()
     MODEL, SCALER, META = load_artifacts()
     BEST_NAME    = META["best_model"]
     LOOKBACK     = META["lookback"]
@@ -157,10 +159,12 @@ def predict(req: ForecastRequest):
 
         for i, v in enumerate(vals):
             ts = start + timedelta(hours=i)
+            kwh_val = round(float(v), 4)
             predictions.append(ForecastPoint(
                 timestamp=ts.isoformat(),
-                predicted_kwh=round(float(v), 4)
+                predicted_kwh=kwh_val
             ))
+            database.insert_prediction(ts.isoformat(), BEST_NAME, horizon, kwh_val)
 
     else:  # LSTM
         # Build synthetic seed window
@@ -192,6 +196,7 @@ def predict(req: ForecastRequest):
                 timestamp=ts.isoformat(),
                 predicted_kwh=round(val, 4)
             ))
+            database.insert_prediction(ts.isoformat(), BEST_NAME, horizon, round(val, 4))
 
             # slide window
             new_row = window_scaled[-1].copy()
@@ -228,6 +233,9 @@ def detect_anomalies(req: AnomalyRequest):
         for i in range(n) if flags[i]
     ]
 
+    for a in anomalies:
+        database.insert_anomaly(a["timestamp"], a["value"], a["z_score"])
+
     return {
         "total_readings": n,
         "anomalies_detected": int(flags.sum()),
@@ -245,23 +253,35 @@ def optimize(req: OptimizationRequest):
     suggestions = []
     peak_hour = int(np.argmax(avg))
     off_peak  = int(np.argmin(avg))
-    evening   = avg[18:23].mean()
-    night     = avg[0:6].mean()
+    
+    evening   = avg[18:23].mean() if len(avg[18:23]) > 0 else 0
+    night     = avg[0:6].mean() if len(avg[0:6]) > 0 else 0
+    morning   = avg[6:12].mean() if len(avg[6:12]) > 0 else 0
+    
+    overall_mean = avg.mean()
+    variance = avg.var()
+
+    if variance > (overall_mean * 0.5) ** 2 + 1e-6:
+        suggestions.append("📉 Usage is highly variable throughout the day. Consider installing a smart thermostat or automated load balancing.")
+
+    if morning > evening * 1.2:
+        suggestions.append(f"🌅 Morning consumption is dominant. Shift non-essential morning loads (e.g., water heating) to the {off_peak:02d}:00 off-peak window.")
+    elif evening > 1.5 * night + 1e-6:
+        suggestions.append(f"⚡ Evening consumption is significantly higher. Distribute load away from the 18:00–22:00 window to avoid peak pricing.")
 
     if peak_hour in range(18, 23):
-        suggestions.append(
-            f"🔴 Peak demand at {peak_hour:02d}:00. Shift heavy loads to {off_peak:02d}:00."
-        )
-    if evening > 1.5 * night + 1e-6:
-        suggestions.append("⚡ Evening consumption is significantly higher. Distribute load away from 18–22h.")
+        suggestions.append(f"🔴 Critical peak demand at {peak_hour:02d}:00. Actively shift heavy appliance usage to {off_peak:02d}:00.")
+
+    if night > overall_mean * 0.6:
+        suggestions.append("🌙 Nighttime base load is unusually high. Check for appliances left on or phantom energy draws while sleeping.")
+
     if req.has_weekend_spike:
-        suggestions.append("📅 Weekend usage 20%+ above weekdays. Review HVAC/lighting schedules.")
+        suggestions.append("📅 Weekend usage is 20%+ above weekdays. Review weekend scheduling of HVAC, lighting, or facility systems.")
+        
     if req.anomaly_count and req.anomaly_count > 0:
-        suggestions.append(f"🔍 {req.anomaly_count} anomalous spikes detected. Inspect equipment.")
-    suggestions.append(
-        f"✅ Best off-peak window: {off_peak:02d}:00–{(off_peak+2)%24:02d}:00. "
-        "Schedule laundry, EV charging, dishwashers here."
-    )
+        suggestions.append(f"🔍 {req.anomaly_count} anomalous spikes detected. Promptly inspect equipment for inefficiencies or faults.")
+
+    suggestions.append(f"✅ Optimal off-peak window: {off_peak:02d}:00–{(off_peak+2)%24:02d}:00. Schedule EV charging, laundry, and dishwashers during this time.")
 
     return {"suggestions": suggestions, "peak_hour": peak_hour, "off_peak_hour": off_peak}
 
