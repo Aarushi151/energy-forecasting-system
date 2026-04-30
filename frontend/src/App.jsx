@@ -4,7 +4,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
-const API = "https://yellow-mushroom-08b25460f.7.azurestaticapps.net";
+
+const API = "https://energy-kash-cpdehaedhranaehn.centralindia-01.azurewebsites.net";
 
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
 const T = {
