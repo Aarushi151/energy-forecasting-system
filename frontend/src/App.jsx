@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 
-const API = "http://localhost:8000";
+const API = "https://yellow-mushroom-08b25460f.7.azurestaticapps.net";
 
 /* ── Design tokens ─────────────────────────────────────────────────────────── */
 const T = {
