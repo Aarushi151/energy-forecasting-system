@@ -18,6 +18,20 @@ from pydantic import BaseModel, Field
 from backend import database
 from backend.model_loader import download_models
 from backend.model_service import load_model, get_model, get_scaler, get_metadata
+from fastapi.middleware.cors import CORSMiddleware
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",  # local frontend (vite)
+        "http://127.0.0.1:5173",
+        "https://yellow-mushroom-08b25460f.7.azurestaticapps.net",  # replace with your actual frontend URL
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 log = logging.getLogger(__name__)
@@ -298,4 +312,5 @@ def model_info():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)t r i g g e r   d e p l o y  
+ 
